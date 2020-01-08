@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow'
+    id 'java-library'
+    id 'com.google.protobuf'
+}
+
+version = '1.0-SNAPSHOT'
+description = 'opentsdb rollups schema serializer'
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    compile 'com.google.protobuf:protobuf-gradle-plugin:0.8.11'
+    compile 'com.google.protobuf:protobuf-java:3.11.0'
+
+    compile('org.apache.kafka:kafka-clients:2.3.0'){
+        exclude(module: "slf4j-log4j12")
+    }
+
+    // Use JUnit test framework
+    testImplementation 'junit:junit:4.12'
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs 'build/generated/source/proto/main/java'
+        }
+    }
+}
+
+shadowJar {
+    baseName = 'serializer'
+    zip64 true
+    relocate 'com.google.protobuf', 'shadow.com.google.protobuf'
+}
+
+build.dependsOn(shadowJar)

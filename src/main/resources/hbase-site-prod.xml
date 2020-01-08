@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+    <property>
+        <name>hbase.client.scanner.timeout.period</name>
+        <value>1800000</value>
+    </property>
+    <property>
+        <name>hbase.rpc.timeout</name>
+        <value>1800000</value>
+    </property>
+    <property>
+        <name>fs.s3a.connection.maximum</name>
+        <value>1000</value>
+    </property>
+    <property>
+        <name>hbase.rpc.timeout</name>
+        <value>1800000</value>
+    </property>
+    <property>
+        <name>hbase.TableSnapshotInputFormat.locality.enabled</name>
+        <value>false</value>
+    </property>
+    <property>
+        <name>hbase.block.data.cacheonread</name>
+        <value>false</value>
+    </property>
+    <property>
+        <name>hbase.hregion.majorcompaction</name>
+        <value>0</value>
+    </property>
+    <property>
+        <name>hbase.hregion.minorcompaction</name>
+        <value>0</value>
+    </property>
+</configuration>

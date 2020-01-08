@@ -1,0 +1,441 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Data Pipeline Template
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Build configuration
+        Parameters:
+          - BuildId
+      -
+        Label:
+          default: Backup configuration
+        Parameters:
+          - BackupWeekNumber
+          - SnapshotRestoreDate
+          - BackupBucket
+      -
+        Label:
+          default: Filter configuration
+        Parameters:
+          - BeforeTimestamp
+          - AfterTimestamp
+      -
+        Label:
+          default: Cluster configuration
+        Parameters:
+          - HBaseClusterColour
+          - TerminateAfter
+          - SSHKeypair
+          - JobBucket
+      -
+        Label:
+          default: Alerting configuration
+        Parameters:
+          - TriggersAlert
+          - VictorOpsIntegrationHook
+
+    ParameterLabels:
+      BuildId:
+        default: "Build identifier"
+      BackupWeekNumber:
+        default: "Backup week number"
+      SnapshotRestoreDate:
+        default: "Date of snapshot"
+      BackupBucket:
+        default: "S3 bucket for source backup"
+      BeforeTimestamp:
+        default: "Start timestamp"
+      AfterTimestamp:
+        default: "End timestamp"
+      HBaseClusterColour:
+        default: "Cluster colour"
+      TerminateAfter:
+        default: "Terminate After"
+      SSHKeypair:
+        default: "SSH key pair"
+      JobBucket:
+        default: "Job bucket"
+      TriggersAlert:
+        default: "Triggers Alerts"
+      VictorOpsIntegrationHook:
+        default: "VictorOps hook"
+Parameters:
+  BuildId:
+    Type: String
+    Default: 'master-200'
+    Description: Identifier of the build to deploy, typically {branch}-{build_no}
+  BackupWeekNumber:
+    Type: Number
+    Description: Week number of source backup
+  BackupBucket:
+    Type: String
+    Description: Bucket which stores source snapshots
+  HBaseClusterColour:
+    Type: String
+    Default: 'green'
+    Description: Colour of backup to use as source for snapshot restore
+  TerminateAfter:
+    Type: String
+    Default: '24'
+    Description: How long to wait for the Spark job to exit before terminating the cluster
+  SSHKeypair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: The SSH key pair to use to connect to EMR instances
+  JobBucket:
+    Type: String
+    Description: S3 bucket the job's JAR file is published to
+  SnapshotRestoreDate:
+    Type: String
+    Default: '2019-08-27'
+    Description: Date of snpashot to restore
+  BeforeTimestamp:
+    Type: String
+    Default: '1564099200000'
+    Description: Start of timerange in millis
+  AfterTimestamp:
+    Type: String
+    Default: '1564704000000'
+    Description: End of timerange (excl.) in millis
+  TriggersAlert:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - true
+      - false
+    Description: If false then alerts will not be triggered when the pipeline fails
+  VictorOpsIntegrationHook:
+    Type: String
+    Description: VictorOps hook for the CloudFormation integration, e.g. https://alert.victorops.com/integrations/cloudwatch/INTEGRATION/alert/KEY/ROUTING-KEY
+
+Conditions:
+  IsAlertingEnabled: !Equals [!Ref TriggersAlert, 'true']
+
+Resources:
+  PipelineFailedSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: https
+          Endpoint: !Ref VictorOpsIntegrationHook
+      TopicName: !Sub "OpenTSDBRollupFailed-${AWS::StackName}"
+
+
+  OpenTSDBRollupPipeline:
+    Type: AWS::DataPipeline::Pipeline
+    Properties:
+      Description: Generate OpenTSDB rollup
+      Name: Generate OpenTSDB rollup
+      Activate: false
+      PipelineObjects:
+        # Even though the subject doesn't factor into the actual alert it's required here.
+        # Also, beware that the message string format is pretty fiddly and the alarm can easily break if changed.
+        - Id: FailureAlarm
+          Name: FailureAlarm
+          Fields:
+            - Key: type
+              StringValue: SnsAlarm
+            - Key: role
+              StringValue: DataPipelineDefaultRole
+            - Key: topicArn
+              StringValue: !Ref PipelineFailedSnsTopic
+            - Key: subject
+              StringValue: OpenTSDB Rollup Failed
+            - Key: message
+
+              # The NewStateValue for the sandbox alert is not valid and won't trigger an VictorOps alert.
+              # Would have been nice to see it in VictorOps as an INFO message but this doesn't look possible with the
+              # CloudWatch compatible integration
+              StringValue: !If [IsAlertingEnabled,
+                                '{\"AlarmName\":\"opentsdb-rollup\",\"NewStateValue\":\"ALARM\",\"NewStateReason\":\"#{node.@status}\",\"StateChangeTime\":\"#{node.@actualEndTime}.000Z\",\"AlarmDescription\":\"ErrorId: #{node.errorId} - ErrorMsg: #{node.errorMessage} - StackTrace: #{node.errorStackTrace}\"}',
+                                '{\"AlarmName\":\"opentsdb-rollup\",\"NewStateValue\":\"NOTHING\",\"NewStateReason\":\"#{node.@status}\",\"StateChangeTime\":\"#{node.@actualEndTime}.000Z\",\"AlarmDescription\":\"Nothing to see here\"}'
+              ]
+        - Id: emrfs-site
+          Name: emrfs-site
+          Fields:
+            - Key: type
+              StringValue: EmrConfiguration
+            - Key: property
+              RefValue: fs-s3-max-connections
+            - Key: classification
+              StringValue: emrfs-site
+        - Id: fs-s3-max-connections
+          Name: fs-s3-max-connections
+          Fields:
+            - Key: type
+              StringValue: Property
+            - Key: key
+              StringValue: fs.s3.maxConnections
+            - Key: value
+              StringValue: '50000'
+        - Id: yarn-site
+          Name: yarn-site
+          Fields:
+            - Key: type
+              StringValue: EmrConfiguration
+            - Key: property
+              RefValue: yarn-nodemanager-resource-memory-mb
+            - Key: property
+              RefValue: yarn-nodemanager-resource-cpu-vcores
+            - Key: classification
+              StringValue: yarn-site
+        - Id: yarn-nodemanager-resource-memory-mb
+          Name: yarn-nodemanager-resource-memory-mb
+          Fields:
+            - Key: type
+              StringValue: Property
+            - Key: key
+              StringValue: yarn.nodemanager.resource.memory-mb
+            - Key: value
+              StringValue: '57344'
+        - Id: yarn-nodemanager-resource-cpu-vcores
+          Name: yarn-nodemanager-resource-cpu-vcores
+          Fields:
+            - Key: type
+              StringValue: Property
+            - Key: key
+              StringValue: yarn.nodemanager.resource.cpu-vcores
+            - Key: value
+              StringValue: '7'
+        - Id: Default
+          Name: Default
+          Fields:
+            - Key: failureAndRerunMode
+              StringValue: CASCADE
+            - Key: resourceRole
+              StringValue: DataPipelineDefaultResourceRole
+            - Key: role
+              StringValue: DataPipelineDefaultRole
+            - Key: pipelineLogUri
+              StringValue: !Sub "s3://${JobBucket}/data-pipeline-logs/"
+            - Key: scheduleType
+              StringValue: ONDEMAND
+            - Key: type
+              StringValue: Default
+        - Id: ConfigureCluster
+          Name: ConfigureCluster
+          Fields:
+            - Key: command
+              StringValue: !Sub |
+                export MASTER_DNS=`curl http://169.254.169.254/latest/meta-data/local-hostname`
+                aws s3 cp s3://${JobBucket}/rollups/${BuildId}/cloudformation/prod.yml /tmp/prod.yml
+                sed -i s/ZOOKEEPER_HOST/$MASTER_DNS/g                                                       /tmp/prod.yml
+                sed -i s/BEFORE_TIMESTAMP/#{myBeforeTimestamp}/g                                            /tmp/prod.yml
+                sed -i s/AFTER_TIMESTAMP/#{myAfterTimestamp}/g                                              /tmp/prod.yml
+                sed -i s/SNAPSHOT_NAME/tsdb-#{mySnapshotRestoreDate}/g                                      /tmp/prod.yml
+                sed -i s,RESTORE_DIRECTORY,s3a://${BackupBucket}/#{myBackupWeekNumber}/${HBaseClusterColour}/archive,g  /tmp/prod.yml
+                sed -i s,ROOT_DIRECTORY,s3a://${BackupBucket}/#{myBackupWeekNumber}/${HBaseClusterColour},g             /tmp/prod.yml
+                cat /tmp/prod.yml
+
+                aws s3 cp s3://${JobBucket}/rollups/${BuildId}/cloudformation/restore_snapshot.rb .
+                aws s3 cp s3://${JobBucket}/rollups/${BuildId}/cloudformation/wait_for_hbase_init.rb .
+                hbase org.jruby.Main wait_for_hbase_init.rb
+
+                # Copy snapshot from S3
+                # Force to use a compatible version of joda-time.  Otherwise we hit an exception quickly after the command runs.
+                sudo -u hbase HBASE_CLASSPATH_PREFIX=/usr/lib/hadoop-mapreduce/joda-time-2.9.4.jar hbase snapshot export -Dfs.3a.buffer.dir=./s3a-buffer-dir -snapshot tsdb-uid-#{mySnapshotRestoreDate} -copy-from s3a://${BackupBucket}/#{myBackupWeekNumber}/${HBaseClusterColour}/  -copy-to hdfs://$MASTER_DNS:8020/user/hbase -chuser hbase -chgroup hbase
+
+                # Restore snapshot
+                hbase org.jruby.Main restore_snapshot.rb tsdb-uid #{mySnapshotRestoreDate}
+            - Key: runsOn
+              RefValue: OpenTSDBRollupCluster
+            - Key: type
+              StringValue: ShellCommandActivity
+            - Key: onFail
+              RefValue: FailureAlarm
+        - Id: SparkRollupJob
+          Name: SparkRollupJob
+          Fields:
+            - Key: step
+              StringValue: !Join
+                - ','
+                - - command-runner.jar
+                  - spark-submit
+                  - --class
+                  - net.skyscanner.opentsdb_rollups.Main
+                  - --verbose
+                  - --deploy-mode
+                  - cluster
+                  - --master
+                  - yarn
+                  - --executor-memory
+                  - 24g
+                  - --executor-cores
+                  - 3
+                  - --num-executors
+                  - 59
+                  - --driver-memory
+                  - 24g
+                  - --driver-cores
+                  - 3
+                  - --conf
+                  - spark.yarn.submit.waitAppCompletion=true
+                  - --conf
+                  - spark.executorEnv.JAVA_HOME=/usr/lib/jvm/jre-1.8.0-openjdk.x86_64
+                  - --conf
+                  - spark.yarn.appMasterEnv.JAVA_HOME=/usr/lib/jvm/jre-1.8.0-openjdk.x86_64
+                  - --files
+                  - file:///tmp/prod.yml
+                  - !Sub "s3://${JobBucket}/rollups/${BuildId}/opentsdb-rollup-all.jar"
+                  - --spark-master
+                  - "yarn-cluster"
+                  - --config
+                  - prod.yml
+            - Key: runsOn
+              RefValue: OpenTSDBRollupCluster
+            - Key: type
+              StringValue: EmrActivity
+            - Key: dependsOn
+              RefValue: ConfigureCluster
+            - Key: onFail
+              RefValue: FailureAlarm
+        - Id: OpenTSDBRollupCluster
+          Name: SkyscannerMetricsOpenTSDBRollup
+          Fields:
+            - Key: subnetId
+              StringValue: !FindInMap [Accounts, !Ref "AWS::AccountId", PrivateSubnetID]
+            - Key: additionalMasterSecurityGroupIds
+              StringValue: '#{mySSHSecurityGroup}'
+            - Key: additionalSlaveSecurityGroupIds
+              StringValue: '#{mySSHSecurityGroup}'
+            - Key: taskInstanceType
+              StringValue: 'r4.2xlarge'
+            - Key: taskInstanceCount
+              StringValue: '20'
+            - Key: coreInstanceType
+              StringValue: 'm5.xlarge'
+            - Key: keyPair
+              StringValue: '#{myEC2KeyPair}'
+            - Key: coreInstanceCount
+              StringValue: '3'
+            - Key: masterInstanceType
+              StringValue: 'm5.xlarge'
+            - Key: releaseLabel
+              StringValue: '#{myEMRReleaseLabel}'
+            - Key: terminateAfter
+              StringValue:
+                Fn::Sub:
+                  - "${Time} Hours"
+                  - Time:
+                      Ref: TerminateAfter
+            - Key: type
+              StringValue: EmrCluster
+            - Key: configuration
+              RefValue: emrfs-site
+            - Key: configuration
+              RefValue: yarn-site
+            - Key: applications
+              StringValue: HBase
+            - Key: applications
+              StringValue: Spark
+      ParameterObjects:
+        - Id: myBackupWeekNumber
+          Attributes:
+            - Key: helpText
+              StringValue: Week of the backup
+            - Key: description
+              StringValue: Calendar week in which the snapshot was taken
+            - Key: optional
+              StringValue: 'false'
+            - Key: type
+              StringValue: String
+        - Id: mySnapshotRestoreDate
+          Attributes:
+            - Key: helpText
+              StringValue: Date of snapshot to restore into the cluster
+            - Key: description
+              StringValue: Snaphot date in format yyyy-mm-dd
+            - Key: optional
+              StringValue: 'false'
+            - Key: type
+              StringValue: String
+        - Id: myBeforeTimestamp
+          Attributes:
+            - Key: helpText
+              StringValue: Start time for the time filter
+            - Key: description
+              StringValue: Start of timerange in millis
+            - Key: optional
+              StringValue: 'false'
+            - Key: type
+              StringValue: String
+        - Id: myAfterTimestamp
+          Attributes:
+            - Key: helpText
+              StringValue: End time for the time filter
+            - Key: description
+              StringValue: End of timerange in millis
+            - Key: optional
+              StringValue: 'false'
+            - Key: type
+              StringValue: String
+        - Id: myEC2KeyPair
+          Attributes:
+            - Key: helpText
+              StringValue: An existing EC2 key pair to SSH into the master node of
+                the EMR cluster as the user "hadoop".
+            - Key: description
+              StringValue: EC2 key pair
+            - Key: optional
+              StringValue: 'true'
+            - Key: type
+              StringValue: String
+        - Id: mySSHSecurityGroup
+          Attributes:
+            - Key: helpText
+              StringValue: Security group that allows SSH access from the office
+            - Key: description
+              StringValue: Security group that allows SSH access from the office
+            - Key: optional
+              StringValue: 'true'
+            - Key: type
+              StringValue: String
+        - Id: myEMRReleaseLabel
+          Attributes:
+            - Key: default
+              StringValue: emr-5.13.0
+            - Key: helpText
+              StringValue: Determines the base configuration of the instances in your
+                cluster, including the Hadoop version.
+            - Key: description
+              StringValue: EMR Release Label
+            - Key: type
+              StringValue: String
+        - Id: myBootstrapAction
+          Attributes:
+            - Key: helpLink
+              StringValue: https://docs.aws.amazon.com/console/datapipeline/emr_bootstrap_actions
+            - Key: helpText
+              StringValue: Bootstrap actions are scripts that are executed during
+                setup before Hadoop starts on every cluster node.
+            - Key: description
+              StringValue: Bootstrap action(s)
+            - Key: isArray
+              StringValue: 'true'
+            - Key: optional
+              StringValue: 'true'
+            - Key: type
+              StringValue: String
+      ParameterValues:
+        - Id: myBackupWeekNumber
+          StringValue: !Ref 'BackupWeekNumber'
+        - Id: mySnapshotRestoreDate
+          StringValue: !Ref 'SnapshotRestoreDate'
+        - Id: myBeforeTimestamp
+          StringValue: !Ref 'BeforeTimestamp'
+        - Id: myAfterTimestamp
+          StringValue: !Ref 'AfterTimestamp'
+        - Id: myEMRReleaseLabel
+          StringValue: emr-5.13.0
+        - Id: myEC2KeyPair
+          StringValue: !Ref 'SSHKeypair'
+Mappings:
+  "Accounts":
+    "000000000000":
+      Name: sandbox
+      PrivateSubnetID: subnet-00000000000000000
+    "111111111111":
+      Name: prod
+      PrivateSubnetID: subnet-11111111111111111

@@ -1,0 +1,37 @@
+tsdbConfig:
+  zookeeperNodes:
+    - ZOOKEEPER_HOST
+kafkaConfig:
+  server: 'localhost:9092'
+  topic: 'prod.opentsdb.1h_rollup.opentsdb.Rollup'
+
+  # Messages to deliver in batch per time period
+  msgPerPeriod: 1000
+
+  # Maximum size of queue of messages waiting to be sent
+  queueCapacity: 100000
+
+  # Delay in milliseconds before starting to send messages to Kafka
+  delayMs: 2000
+
+  # Time interval in milliseconds between sending batched messages to Kafka
+  periodMs: 1000
+
+
+# Filter OpenTSDB rows based on timestamp
+timeFilterConfig:
+  # Hbase server time filters based on the time the data points hit hbase
+  useHbaseServerTimeFilter: true
+  # Metric time filters based on the time in the data point message ultimately the row key
+  useMetricTimeRangeFilter: true
+  # Lower and upper bound for time series to be included
+  startTime: BEFORE_TIMESTAMP
+  endTime: AFTER_TIMESTAMP
+  # 50 minute grace period for late arriving data which we add to the hbase server time filter
+  gracePeriodMs: 3000000
+
+hbaseConfig:
+  siteXmlPath: 'hbase-site-prod.xml'
+  tsdbTableSnapshotName: SNAPSHOT_NAME
+  hbaseTableSnapshotInputFormatRestoreDir: RESTORE_DIRECTORY
+  hbaseRootdir: ROOT_DIRECTORY

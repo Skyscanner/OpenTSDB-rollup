@@ -1,0 +1,46 @@
+/**
+ * Copyright 2020 Skyscanner Limited.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto2";
+
+option java_package = "net.skyscanner.opentsdb_rollup.filters.generated";
+option java_generic_services = true;
+option java_generate_equals_and_hash = true;
+option optimize_for = SPEED;
+
+/* Comparison operators */
+enum CompareType {
+  LESS = 0;
+  LESS_OR_EQUAL = 1;
+  EQUAL = 2;
+  NOT_EQUAL = 3;
+  GREATER_OR_EQUAL = 4;
+  GREATER = 5;
+  NO_OP = 6;
+}
+
+message MetricTimeComparator {
+  required bytes value = 1;
+  required int32 referenceTimestamp = 2;
+  required int32 timestampLength = 3;
+  required bytes saltLength = 4;
+  required bytes uidLength = 5;
+}
+
+message TimeFilter {
+  required CompareType compare_op = 1;
+  required int32 timestamp = 2;
+}

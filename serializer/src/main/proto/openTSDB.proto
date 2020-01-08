@@ -1,0 +1,57 @@
+/**
+ * Copyright 2020 Skyscanner Limited.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+package metrics;
+option java_package = "net.skyscanner.schemas";
+
+
+message DateTime {
+    // The following fields should be interpreted as:
+    // local_time_millis = unix_time_millis + timezone_offset_mins * 60000 + daylight_savings_offset_mins * 60000
+    int64 unix_time_millis = 1; // UNIX timestamp in MILLIS
+    int32 timezone_offset_mins = 2; // Timezone offset from UTC in minutes, For example UK = 0, NL = 60. Does not include any adjustment for daylight savings.
+    int32 daylight_savings_offset_mins = 3; // A countries daylight savings offset in minutes. Set only when a country observes daylights saving time. For Example: UK = 60, NL = 60
+
+    enum Precision { //Precision enables us to specify open dates like months, years or seconds
+         MILLI = 0;
+         SECOND = 1;
+         DAY = 2;
+         WEEK = 4;
+         MONTH = 5;
+         YEAR = 6;
+         ANYTIME = 7; //Anytime is unspecified time
+         MINUTE = 8;
+    }
+
+    Precision date_time_kind = 4;
+}
+
+message LightHeader {
+    string guid = 1; // Event GUID
+    DateTime event_timestamp = 2; // Timestamp for the event
+}
+
+// OpenTSDB Rollup message
+message RollupMessage {
+    LightHeader header = 1;
+    string metric = 2;
+    map<string, string> tags = 3;  // key-value pair tags that you want your metric to have in OpenTSDB
+    double sum = 4;
+    double min = 5;
+    double max = 6;
+    uint64 count = 7;
+}

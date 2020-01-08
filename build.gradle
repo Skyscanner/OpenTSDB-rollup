@@ -1,0 +1,172 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.10'
+    }
+}
+
+plugins {
+    id 'java'
+    id 'maven'
+    id 'application'
+    id 'idea'
+    id 'com.github.johnrengelman.shadow' version '5.1.0'
+    id 'jacoco'
+    id 'org.sonarqube' version '2.7'
+    id 'com.google.protobuf' version '0.8.10'
+}
+
+apply plugin: 'java-library'
+
+group = 'net.skyscanner'
+version = '1.0-SNAPSHOT'
+description = 'OpenTSDB rollups Spark job'
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:2.5.0'
+    }
+    generatedFilesBaseDir = "$projectDir/gen"
+}
+
+
+
+clean {
+    delete protobuf.generatedFilesBaseDir
+}
+
+idea {
+    module {
+        // proto files and generated Java files are automatically added as
+        // source dirs.
+        // If you have additional sources, add them here:
+        sourceDirs += file("/path/to/other/sources");
+    }
+}
+
+project.ext {
+    logbackVersion = '1.2.2'
+    joptVersion = '5.0.4'
+    snakeyamlVersion = '1.18'
+    vavrVersion = '0.9.0'
+    grapplerVersion = '5.5.5'
+
+    // The following are dependency versions used by EMR 5.20.0 (in the cloud/pipeline.yml file):
+    sparkVersion = '2.3.0'
+    sparkTestingVersion = '2.3.0'
+    awsVersion = '1.11.461'
+
+    guavaVersion = '14.0.1'
+    hbaseVersion = '1.4.10'
+}
+
+mainClassName = "net.skyscanner.opentsdb_rollups.Main"
+
+subprojects {
+    group = 'net.skyscanner'
+
+    apply plugin: 'java'
+    apply plugin: 'java-library'
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+}
+
+allprojects {
+    repositories {
+        maven {
+            url "https://artifactory.skyscannertools.net/artifactory/maven"
+            credentials {
+                username "$SKYSCANNER_ARTIFACTORY_MAVEN_USER"
+                password "$SKYSCANNER_ARTIFACTORY_MAVEN_PASSWORD"
+            }
+        }
+        maven {
+            url "https://repository.cloudera.com/artifactory/cloudera-repos/"
+        }
+        maven {
+            url "https://maven.twttr.com/"
+        }
+    }
+}
+
+dependencies {
+    api project(path: ':serializer', configuration: 'shadow')
+    api project(path: ':opentsdb', configuration: 'shadow')
+
+    implementation "ch.qos.logback:logback-classic:${logbackVersion}"
+    implementation "net.sf.jopt-simple:jopt-simple:${joptVersion}"
+    implementation "org.yaml:snakeyaml:${snakeyamlVersion}"
+    implementation "io.vavr:vavr:${vavrVersion}"
+
+    compileOnly ("org.apache.spark:spark-core_2.11:${sparkVersion}")
+    compileOnly ("org.apache.spark:spark-sql_2.11:${sparkVersion}")
+    compileOnly ("org.apache.spark:spark-streaming_2.11:${sparkVersion}")
+
+    implementation group: 'org.scala-lang', name: 'scala-library', version: '2.11.8'
+
+    // Use JUnit test framework
+    testImplementation 'junit:junit:4.12'
+
+    implementation 'org.apache.kafka:kafka-clients:2.3.0'
+
+    compile group: 'org.apache.hbase', name: 'hbase', version: "${hbaseVersion}", ext: 'pom'
+    compile group: 'org.apache.hbase', name: 'hbase-common', version: "${hbaseVersion}"
+    compile group: 'org.apache.hbase', name: 'hbase-client', version: "${hbaseVersion}"
+    compile group: 'org.apache.hbase', name: 'hbase-server', version: "${hbaseVersion}"
+    compile 'org.apache.hadoop:hadoop-aws:2.8.1'
+    compile 'com.hadoop.gplcompression:hadoop-lzo:0.4.20'
+
+    testCompile "org.mockito:mockito-core:2.+"
+}
+
+jar {
+    manifest {
+        attributes (
+            "Main-Class": "net.skyscanner.opentsdb_rollups.Main"
+        )
+    }
+}
+
+configurations {
+    runtime.exclude group: "org.slf4j", module: "slf4j-log4j12"
+    runtime.exclude group: "org.slf4j", module: "log4j-over-slf4j"
+}
+
+shadowJar {
+    mergeServiceFiles()
+    version = null
+    zip64 true
+}
+
+build.dependsOn(shadowJar)
+
+run.doFirst { environment 'SPARK_LOCAL_IP', '127.0.0.1' }
+
+run {
+    args '--config', 'dev.yml', '--spark-master', 'local[*]'
+}
+jacoco {
+    toolVersion = "0.8.3"
+}
+
+jacocoTestReport {
+    reports {
+        xml.enabled true
+        csv.enabled false
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force "com.google.guava:guava:${guavaVersion}"
+    }
+}

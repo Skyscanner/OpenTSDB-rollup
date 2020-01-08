@@ -1,0 +1,38 @@
+plugins {
+    id 'com.github.johnrengelman.shadow'
+}
+
+version = '1.0-SNAPSHOT'
+description = 'shaded and relocated opentsdb'
+
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    implementation('org.hbase:asynchbase:1.8.2')
+    api('net.opentsdb:opentsdb:2.4.0')
+    api('com.google.protobuf:protobuf-java:2.5.0')
+    api('com.google.guava:guava:18.0')
+    api('io.netty:netty:3.9.4.Final')
+    api('com.stumbleupon:async:1.4.0')
+    api('org.apache.zookeeper:zookeeper:3.4.6') { dep ->
+        [
+                'log4j'    : 'log4j',
+                'org.slf4j': 'slf4j-log4j12',
+                'jline'    : 'jline',
+                'junit'    : 'junit',
+        ].each { group, module -> dep.exclude group: group, module: module }
+    }
+    api('org.slf4j:slf4j-api:1.7.7')
+    runtime('org.slf4j:log4j-over-slf4j:1.7.7')
+}
+
+shadowJar {
+    baseName = 'opentsdb'
+    zip64 true
+    relocate 'com.google.protobuf', 'hbaseshadow.com.google.protobuf'
+}
+
+build.dependsOn(shadowJar)
