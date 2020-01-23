@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package net.skyscanner.opentsdb_rollups;
+package net.skyscanner.opentsdb_rollups.parser;
 
 import java.io.Serializable;
 
@@ -32,10 +32,8 @@ public class Aggregate implements Serializable {
         this.count = count;
     }
 
-    double getSum() { return sum; }
-    double getMin() { return min; }
-    double getMax() { return max; }
-    long getCount() {
-        return count;
-    }
+    public double getSum() { return sum; }
+    public double getMin() { return min; }
+    public double getMax() { return max; }
+    public long getCount() { return count; }
 }

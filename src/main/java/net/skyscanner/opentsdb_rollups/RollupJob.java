@@ -16,15 +16,15 @@
 
 package net.skyscanner.opentsdb_rollups;
 
-import net.opentsdb.core.HistogramDataPoint;
-import net.opentsdb.core.Internal;
 import net.skyscanner.opentsdb_rollups.config.Config;
 import net.skyscanner.opentsdb_rollups.config.HBaseConfig;
 import net.skyscanner.opentsdb_rollups.config.KafkaConfig;
 import net.skyscanner.opentsdb_rollups.config.TimeFilterConfig;
 import net.skyscanner.opentsdb_rollups.config.TsdbConfig;
 import net.skyscanner.opentsdb_rollups.filter.TimeFilter;
+import net.skyscanner.opentsdb_rollups.parser.Aggregate;
 import net.skyscanner.opentsdb_rollups.parser.TsdbRowKey;
+import net.skyscanner.opentsdb_rollups.parser.TsdbRowValue;
 import net.skyscanner.opentsdb_rollups.parser.TsdbTableParser;
 import net.skyscanner.opentsdb_rollups.producer.RollupKafkaProducer;
 import net.skyscanner.opentsdb_rollups.resolver.ResolvedTSUID;
@@ -38,27 +38,20 @@ import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
 import org.apache.hadoop.hbase.mapreduce.TableSnapshotInputFormat;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
-import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
-import org.hbase.async.KeyValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import scala.Tuple2;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.DoubleSummaryStatistics;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 
 class RollupJob {
     private static final Logger log = LoggerFactory.getLogger(RollupJob.class);
-    private static final byte[] T_TABLE_FAMILY = Bytes.toBytes("t");
     private final JavaSparkContext sparkContext;
     private final TimeFilterConfig timeFilterConfig;
     private final HBaseConfig hbaseConfig;
@@ -133,7 +126,7 @@ class RollupJob {
         JavaPairRDD<ImmutableBytesWritable, Result> tsdb = this.newTsdbRDD("tsdb");
         Broadcast<UidResolver> uidResolver = this.sparkContext.broadcast(new UidResolver(tsdbConfig.getZookeeperNodes()));
 
-        tsdb.mapValues(RollupJob::aggregateRow).foreachPartition(p -> {
+        tsdb.mapValues(TsdbRowValue::aggregateRow).foreachPartition(p -> {
             RollupKafkaProducer kafkaProducer = new RollupKafkaProducer(kafkaConfig);
             kafkaProducer.startClock();
             UidResolver resolver = uidResolver.value();
@@ -183,64 +176,6 @@ class RollupJob {
         }
     }
 
-    /**
-     * Aggregates the values of a row
-     *
-     * @param row The {@link Result} containing the individual HBase cells of the row as returned by the {@link CustomTableSnapshotInputFormat}
-     * @return An {@link Aggregate} with the sum, count, min and max value of the values from this row
-     */
-    private static Aggregate aggregateRow(Result row) {
-        List<Double> dataPoints = new ArrayList<>();
 
-        Map<byte[], byte[]> qualifierToValue = row.getFamilyMap(T_TABLE_FAMILY);
-        qualifierToValue.forEach((qualifier, valueBytes) -> {
-            if (qualifier[0] == HistogramDataPoint.PREFIX) {
-                // TODO: Do we want to roll up histograms? Can we?
-                return;
-            }
 
-            dataPoints.addAll(extractPointsFromQualifier(row.getRow(), qualifier, valueBytes));
-        });
-
-        if (dataPoints.isEmpty()) {
-            return null;
-        }
-
-        DoubleSummaryStatistics stats = dataPoints.stream().collect(Collectors.summarizingDouble(Double::doubleValue));
-
-        return new Aggregate(stats.getSum(), stats.getMin(), stats.getMax(), stats.getCount());
-    }
-
-    /**
-     * Extracts points from an HBase cell represented by a qualifier/value pair
-     * <p>
-     * The qualifier/value pair can contain multiple data points if we're looking at a compacted cell; in which case
-     * the qualifiers of previously separate HBase cells have been compacted by OpenTSDB, meaning the bytes of both the
-     * qualifiers and values of the previous HBase cells have been concatenated
-     *
-     * The name of the {@link Internal.Cell} class used by OpenTSDB is misleading and doesn't have anything to do with
-     * HBase cells. It's just a wrapper around a qualifier and a value, presumably because they once made the assumption
-     * that every HBase cell could only hold one value.
-     *
-     * @param row        The byte array representing the row key
-     * @param qualifier  The column qualifier
-     * @param valueBytes The byte array holding the values to decode
-     * @return A list of extracted values from this HBase cell
-     */
-    private static List<Double> extractPointsFromQualifier(byte[] row, byte[] qualifier, byte[] valueBytes) {
-        try {
-            KeyValue kv = new KeyValue(row, T_TABLE_FAMILY, qualifier, valueBytes);
-            List<Internal.Cell> extractedDataPoints = Internal.extractDataPoints(kv);
-
-            return extractedDataPoints.stream()
-                    .map(Internal.Cell::parseValue)
-                    .map(Number::doubleValue)
-                    .collect(Collectors.toList()
-                    );
-
-        } catch (Exception e) {
-            log.error("Exception thrown while parsing values for qualifiers", e);
-            return new ArrayList<>();
-        }
-    }
 }

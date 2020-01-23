@@ -16,86 +16,36 @@
 
 package net.skyscanner.opentsdb_rollups.parser;
 
-import org.junit.Before;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class TsdbRowValueTest {
 
-    private long testWriteTime, testTimestamp;
-    private List<Double> testValues;
-
-    @Before
-    public void setup() {
-        testWriteTime = 1561024800;
-        testTimestamp = 1560172880;
-
-        testValues = new ArrayList<>();
-        testValues.add(1.0);
-        testValues.add(2.0);
-    }
-
-
     @Test
-    public void testAddValues() {
-        TsdbRowValue rowVal = new TsdbRowValue();
+    public void testDuplicateCellQualifiersRemoved() {
+        byte[] row = {0x00, 0x22, 0x35, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x0b, 0x5e, 0x00, 0x00, 0x04, 0x00, 0x00, 0x0b, 0x08, 0x00, 0x00, 0x06, 0x00, 0x00, 0x0b, 0x7a, 0x00, 0x00, 0x04, 0x00, 0x00, 0x01, 0x0f};
+        NavigableMap<byte[], byte[]> map = new TreeMap<>(Bytes.BYTES_COMPARATOR);
+        byte[] key = {3, -53};
+        byte[] value = {78, 29, 66, -54};
+        map.put(key, value);
+        byte[] key2 = {3, -49};
+        byte[] value2 = {65, -61, -74, -60, -98, 0, 0, 0};
+        map.put(key2, value2);
 
-        rowVal.addValues(testWriteTime, testTimestamp, testValues);
-        assertEquals(testValues, rowVal.getValues());
+        Result result = mock(Result.class);
+        when(result.getRow()).thenReturn(row);
+        when(result.getFamilyMap(any(byte[].class))).thenReturn((map));
+
+        Aggregate aggregate = TsdbRowValue.aggregateRow(result);
+        assertEquals(1, aggregate.getCount());
     }
-
-    @Test
-    public void testAddMultipleValues() {
-        TsdbRowValue rowVal = new TsdbRowValue();
-        List<Double> moreValues = new ArrayList<>();
-        moreValues.add(3.0);
-        moreValues.add(4.0);
-
-        rowVal.addValues(testWriteTime, testTimestamp, testValues);
-        rowVal.addValues(testWriteTime, testTimestamp + 1, moreValues);
-
-        List<Double> joinedValues = new ArrayList<>(testValues);
-        joinedValues.addAll(moreValues);
-        assertEquals(joinedValues, rowVal.getValues());
-    }
-
-
-    @Test
-    public void testValuesOverwrite() {
-        TsdbRowValue rowVal = new TsdbRowValue();
-        List<Double> overWriteValues = new ArrayList<>();
-        overWriteValues.add(10.0);
-        overWriteValues.add(11.0);
-
-        assertNotEquals(overWriteValues, testValues);
-
-        rowVal.addValues(testWriteTime, testTimestamp, testValues);
-        assertEquals(testValues, rowVal.getValues());
-
-        rowVal.addValues(testWriteTime + 1, testTimestamp, overWriteValues);
-        assertEquals(overWriteValues, rowVal.getValues());
-    }
-
-
-    @Test
-    public void testNotOverwrite() {
-        TsdbRowValue rowVal = new TsdbRowValue();
-        List<Double> overWriteValues = new ArrayList<>();
-        overWriteValues.add(10.0);
-        overWriteValues.add(11.0);
-
-        assertNotEquals(overWriteValues, testValues);
-
-        rowVal.addValues(testWriteTime, testTimestamp, testValues);
-        assertEquals(testValues, rowVal.getValues());
-
-        rowVal.addValues(testWriteTime - 1, testTimestamp, overWriteValues);
-        assertEquals(testValues, rowVal.getValues());
-    }
-
 }
