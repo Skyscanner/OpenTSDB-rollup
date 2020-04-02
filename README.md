@@ -103,7 +103,7 @@ The serializer project is needed to create a shaded JAR for serialising rollup s
 Our schemas use proto3 while HBase still uses proto2. 
 No additional steps are needed to update this code as the shaded JAR is automatically included in the main rollup job build.   
 
-[Skyscanner Engineering blog post]: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+[Skyscanner Engineering blog post]: https://medium.com/@SkyscannerEng/roll-up-to-speed-up-improving-opentsdb-query-performance-83a647cba4ac
 [ExportSnapshot]: http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/snapshot/ExportSnapshot.html 
 [EMR cluster config]: https://docs.aws.amazon.com/datapipeline/latest/DeveloperGuide/dp-object-emrcluster.html
 [VictorOps]: https://www.victorops.com
